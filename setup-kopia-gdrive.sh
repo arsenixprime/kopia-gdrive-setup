@@ -146,6 +146,7 @@ Description=daily kopia-gdrive snapshot
 [Timer]
 OnCalendar=${BACKUP_ONCALENDAR}
 RandomizedDelaySec=30m
+FixedRandomDelay=true
 Persistent=true
 
 [Install]
@@ -174,6 +175,7 @@ Description=weekly kopia-gdrive snapshot verification
 [Timer]
 OnCalendar=${VERIFY_ONCALENDAR}
 RandomizedDelaySec=30m
+FixedRandomDelay=true
 Persistent=true
 
 [Install]

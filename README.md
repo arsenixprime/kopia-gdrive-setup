@@ -82,8 +82,12 @@ or copy an existing machine's token as `gdrive-token.json` instead of
 ## What it sets up
 
 - Repository in an app-owned Drive folder `kopia-backup-<hostname>`
-- Daily snapshot of `/` at 03:00 (±30 min jitter), with catch-up after
-  downtime; runs at low CPU/IO priority
+- Daily snapshot of `/` at 03:00 plus a per-machine stable offset of up
+  to 30 min (`FixedRandomDelay`: each host hashes its own offset from
+  its machine-id, so several machines on one network naturally avoid
+  backing up at the same instant, every night). Catch-up after
+  downtime; runs at low CPU/IO priority. For guaranteed separation,
+  give each machine its own slot with `BACKUP_ONCALENDAR` (below).
 - Weekly 10% snapshot verification (Sundays)
 - Retention: 3 latest / 30 daily / 8 weekly / 6 monthly; zstd compression
 - Excludes: `/proc /sys /dev /run /tmp /var/tmp /var/log /var/cache`,

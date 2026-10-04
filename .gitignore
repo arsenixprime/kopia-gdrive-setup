@@ -1,0 +1,10 @@
+# credentials — never commit these
+client.json
+gdrive-token.json
+token-cache.json
+*.token.json
+
+# binaries ship as release assets, not in git
+kopia-gdrive-amd64
+kopia-gdrive-arm64
+SHA256SUMS

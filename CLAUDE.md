@@ -49,6 +49,16 @@ checking on backups, test-restores, and troubleshooting.
   display is TTY-only). "Is it doing anything?" → `systemctl status`
   for runtime/CPU, or run a snapshot manually in a terminal for the
   live progress line.
+- Sleep/resume or a network change mid-backup: from release v0.2.0 the
+  backend detects dead connections within about a minute (HTTP/2
+  health-check pings, a 2-minute response timeout, a 5-minute no-data
+  timeout) and retries, resuming a resumable upload on the same Drive
+  session. A backup that sits idle for many minutes after a wake usually
+  means an older binary: check `kopia-gdrive --version` and upgrade.
+  Stopping a backup (`systemctl stop`) is always safe; uploaded data is
+  kept and the next run continues from it.
+- The wifi allowlist in roaming mode is checked when a backup starts,
+  not while it runs.
 - Google OAuth app left in *Testing* mode → refresh tokens expire after
   7 days and backups start failing with auth errors. Fix: publish the
   OAuth app to production in the Google Cloud console, delete

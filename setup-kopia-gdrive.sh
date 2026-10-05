@@ -184,6 +184,7 @@ daily-*)
   [ "$now" -lt "$anchor" ] && anchor=$(date -d "yesterday ${hour}:00" +%s)
 
   if [ -f "$stamp" ] && [ "$(stat -c %Y "$stamp")" -ge "$anchor" ]; then
+    echo "kopia-gdrive: already ran since ${hour}:00 anchor, skipping"
     exit 1
   fi
   ;;

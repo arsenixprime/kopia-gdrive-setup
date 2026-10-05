@@ -105,6 +105,33 @@ BACKUP_ONCALENDAR="*-*-* 01:30:00"       # systemd OnCalendar syntax
 VERIFY_ONCALENDAR="Mon *-*-* 06:00:00"
 ```
 
+## Laptops and roaming machines
+
+A machine that sleeps at night, leaves the house, or sits on hotel
+wifi should not use the fixed 03:00 schedule. Install with:
+
+```sh
+sudo ALLOWED_SSIDS="HomeWifi,OfficeWifi" ./setup-kopia-gdrive.sh
+```
+
+This switches the backup to roaming mode:
+
+- Backups run **only while connected to one of the listed wifi
+  networks** (exact SSID match; edit `/etc/kopia-gdrive/allowed-ssids`
+  any time, one SSID per line — works with NetworkManager, iwd, or
+  anything else, via `nmcli` with an `iw` fallback).
+- The timer checks **hourly**, but a backup only actually runs once
+  per day: at the first allowed opportunity after 03:00 (override with
+  `ANCHOR_HOUR=HH`). Asleep at 03:00 and opened at 09:00 at home →
+  backs up within the hour. Away all day → backs up within an hour of
+  coming home. Already done today → every other check is a silent
+  skip ("condition not met", not a failure, so logs stay clean).
+- The weekly verification also only runs on allowed networks.
+
+Verify the gating any time with
+`systemctl status kopia-gdrive-backup.service` — skipped runs show
+the SSID decision from the condition check.
+
 ## Day-2 operations
 
 ```sh

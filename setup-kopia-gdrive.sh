@@ -20,6 +20,13 @@
 #   DEVICE_FLOW=1                               headless machine: show a code
 #                                               to enter on another device
 #                                               instead of opening a browser
+#   ALLOWED_SSIDS="Home,Office"                 roaming mode for laptops:
+#                                               back up only on these wifi
+#                                               networks, checking hourly and
+#                                               running at the first allowed
+#                                               opportunity once per day
+#   ANCHOR_HOUR=03                              roaming mode: a backup is due
+#                                               once per day after this hour
 #
 # Idempotent: safe to re-run; it reuses an existing repo/password/config.
 set -euo pipefail
@@ -31,6 +38,8 @@ SNAPSHOT_PATHS="${SNAPSHOT_PATHS:-/}"
 FOLDER_NAME="${FOLDER_NAME:-kopia-backup-$(hostname -s)}"
 BACKUP_ONCALENDAR="${BACKUP_ONCALENDAR:-*-*-* 03:00:00}"
 VERIFY_ONCALENDAR="${VERIFY_ONCALENDAR:-Sun *-*-* 05:00:00}"
+ALLOWED_SSIDS="${ALLOWED_SSIDS:-}"
+ANCHOR_HOUR="${ANCHOR_HOUR:-03}"
 
 ARCH=$(uname -m)
 case "$ARCH" in
@@ -123,6 +132,74 @@ esac
 echo "== provider sanity check (~1 min) =="
 kg repository validate-provider
 
+BACKUP_EXTRA=""
+VERIFY_EXTRA=""
+BACKUP_TIMER_SPEC="OnCalendar=${BACKUP_ONCALENDAR}"
+BACKUP_JITTER="30m"
+
+if [ -n "$ALLOWED_SSIDS" ]; then
+  echo "== roaming mode: wifi-gated backups, hourly due-check =="
+  printf '%s\n' "${ALLOWED_SSIDS//,/$'\n'}" > "$ETC/allowed-ssids"
+  chmod 0644 "$ETC/allowed-ssids"
+
+  cat > /usr/local/bin/kopia-gdrive-due <<'HELPER'
+#!/bin/bash
+# ExecCondition helper for kopia-gdrive units on roaming machines.
+# usage: kopia-gdrive-due <stamp-name> <daily-HH|net-only>
+# exit 0 = proceed, exit 1 = skip this run (systemd: condition not met).
+set -u
+ETC=/etc/kopia-gdrive
+
+ssid=""
+if command -v nmcli >/dev/null 2>&1; then
+  ssid=$(nmcli -t -f ACTIVE,SSID dev wifi 2>/dev/null \
+         | sed -n 's/^yes://p' | sed 's/\\:/:/g' | head -1)
+fi
+if [ -z "$ssid" ]; then
+  for w in /sys/class/net/*/wireless; do
+    [ -e "$w" ] || continue
+    dev=$(basename "$(dirname "$w")")
+    ssid=$(iw dev "$dev" link 2>/dev/null | sed -n 's/^[[:space:]]*SSID: //p' | head -1)
+    [ -n "$ssid" ] && break
+  done
+fi
+
+if [ -f "$ETC/allowed-ssids" ]; then
+  if [ -z "$ssid" ]; then
+    echo "kopia-gdrive: not on wifi, skipping"
+    exit 1
+  fi
+  if ! grep -Fxq -- "$ssid" "$ETC/allowed-ssids"; then
+    echo "kopia-gdrive: network '$ssid' not in allowed-ssids, skipping"
+    exit 1
+  fi
+fi
+
+case "${2:-net-only}" in
+daily-*)
+  hour=${2#daily-}
+  stamp="$ETC/$1"
+  now=$(date +%s)
+  anchor=$(date -d "today ${hour}:00" +%s)
+  [ "$now" -lt "$anchor" ] && anchor=$(date -d "yesterday ${hour}:00" +%s)
+
+  if [ -f "$stamp" ] && [ "$(stat -c %Y "$stamp")" -ge "$anchor" ]; then
+    exit 1
+  fi
+  ;;
+esac
+
+exit 0
+HELPER
+  chmod 0755 /usr/local/bin/kopia-gdrive-due
+
+  BACKUP_EXTRA="ExecCondition=/usr/local/bin/kopia-gdrive-due last-backup daily-${ANCHOR_HOUR}
+ExecStartPost=/usr/bin/touch ${ETC}/last-backup"
+  VERIFY_EXTRA="ExecCondition=/usr/local/bin/kopia-gdrive-due last-verify net-only"
+  BACKUP_TIMER_SPEC="OnCalendar=hourly"
+  BACKUP_JITTER="10m"
+fi
+
 echo "== installing systemd units =="
 cat > /etc/systemd/system/kopia-gdrive-backup.service <<EOF
 [Unit]
@@ -135,6 +212,7 @@ Type=oneshot
 EnvironmentFile=${ETC}/env
 Environment=KOPIA_CHECK_FOR_UPDATES=false
 ExecStart=/usr/local/bin/kopia-gdrive --config-file ${CONFIG} snapshot create ${SNAPSHOT_PATHS}
+${BACKUP_EXTRA}
 Nice=10
 IOSchedulingClass=idle
 EOF
@@ -144,8 +222,8 @@ cat > /etc/systemd/system/kopia-gdrive-backup.timer <<EOF
 Description=daily kopia-gdrive snapshot
 
 [Timer]
-OnCalendar=${BACKUP_ONCALENDAR}
-RandomizedDelaySec=30m
+${BACKUP_TIMER_SPEC}
+RandomizedDelaySec=${BACKUP_JITTER}
 FixedRandomDelay=true
 Persistent=true
 
@@ -164,6 +242,7 @@ Type=oneshot
 EnvironmentFile=${ETC}/env
 Environment=KOPIA_CHECK_FOR_UPDATES=false
 ExecStart=/usr/local/bin/kopia-gdrive --config-file ${CONFIG} snapshot verify --verify-files-percent=10
+${VERIFY_EXTRA}
 Nice=10
 IOSchedulingClass=idle
 EOF
